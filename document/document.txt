@@ -1,0 +1,243 @@
+光子映射 设计文档 20140801
+THU\CST\33\古裔正 zsyzgu@163.com
+
+一、简介
+	这是一个光子映射引擎，基于光线追踪。直接光照使用了经典的光线追踪算法，而焦散、映射等二次光照则用光子映射来估算。
+
+二、编译环境
+	没有外包库，可以在普通Dev-c++上编译通过
+
+三、各种类数据和接口的说明：
+	（顺序是从底层到顶层，后面的库可能会用到前面的库。这也是我编写这个项目的顺序。）
+
+【vector3：三维向量库】
+class Vector3
+	数据：
+		1：double x,y,z;				变量的三个分量
+	接口：
+		1：~						支持各种加减乘除运算，其中A*B表示A叉乘B
+		2：Vector3 Dot(Vector3&);			表示点乘
+		3：Vector3 Module(); Vector3 Module2();		分别得到模长和模长的平方
+		4：Vector3 Distance(Vector3&); Vector3 Distance2(Vector3&);
+								分别求到某点的距离和平方距离
+		5：double& GetCoord(int axis);			得到某条轴上的坐标值，axis=0,1,2时分别表示x,y,z轴
+		6：Vector3 GetUnitVector();			得到单位向量
+		7：void AssRandomVector();			使该向量变成一个随机的单位向量
+		8：Vector3 GetAnVerticalVector();		得到一个垂直的向量
+		9：bool IsZeroVector();				判断是否为零向量，有误差判断
+		10：void Input(stringstream&);			从流中读取数据
+		11：Vector3 Reflect(Vector3 N);			计算该光线遇到面N的反射光线
+		12：Vector3 Refract(Vector3 N,double n);	计算该光线遇到面N的折射光线（折射率之比为n）
+		13：Vector3 Diffuse();				已该向量为法向量得到以漫反射的概率分布得到一个反射射线
+		14：Vector3 Rotate(Vector3 axis,double theta);	将向量沿着axis轴逆时针旋转theta度
+
+【color: 色彩库】
+class Color
+	数据：
+		1：double r,g,b;				色光三原色（红、绿、蓝）的亮度，取值0~1
+	接口：
+		1：~						支持各种加减乘除运算
+		2：Color Confine();				得到色光亮度分量均不大于1的色光（实际上有可能大于1但屏幕不能显示）
+		3：void Input(stringstream&);			从流中读取数据
+		4：Color Power();				计算该色光的能量
+
+【bmp: 图片库】
+class Bmp
+	数据：
+		1：~						bmp文件相关数据
+	接口：
+		1：~						各种基本数据的获取和设置函数
+		2：Bmp(int H=0,int W=0);			构造时可以规定图片大小
+		3：void Initialize(int H,int W);		初始化一个图片
+		4：void Input(string file);			从一个bmp文件时读取数据
+		5：void Output(string file);			把数据输出到一个bmp文件中
+		6：Color GetSmoothColor(double u,double v);	得到在象素(u,v)的色光，取周围整数象素色光的加权平均值
+
+【primitive：物品库】
+class Material（物品材质）
+	数据：
+		1：Color color,absor;				物品色彩、透明物品吸收的色光
+		2：double refl,refr,diff,spec;			反射、折射、漫反射、镜面漫反射的百分比
+		3：double rindex;				折射率
+		4：double drefl;				蒙特卡罗算法模拟镜面漫反射时，反射光线的偏差半径（=0时不使用该算法）
+		5：Bmp* texture;				纹理相关的bmp的文件(=NULL时不加纹理)
+	接口：
+		1：void Input(string var,stringstream&)		从流中读取数据，其中var提示要读取的变量
+struct Crash（计算碰撞时得到的数据）
+	数据：
+		1：Vector3 N,C;					碰撞处的法平面和坐标
+		2：double dist;					碰撞前光线走过距离
+		3：bool front;					是否从物体正面碰撞
+class Primitive（物品基类）
+	数据：
+		1：int sample;					每个物品都有的一个随机数，用于渲染时hash判断是否可能有锯齿
+		2：Material* material;				物品材质
+		3：Primitive* next;				下一个物品（用链表储存物品集）
+		4：[public:]Crash crash;			用于储存碰撞信息
+	接口：
+		1：~						各种基本数据的获取和设置函数
+		2：virutal void Input(string var,stringstream&)=0;
+								从流中读取数据，其中var提示要读取的变量
+		3：virtual bool Collide(Vector3 ray_O,Vector3 ray_V)=0;
+								计算光线(ray_O,ray_V)到物品碰撞情况，碰撞数据存在crash中，返回是否有碰撞
+		4：virtual Color GetTexture()=0;		根据碰撞信息crash计算碰撞点的纹理色彩
+		5：virtual Primitive* PrimitiveCopy() = 0;	得到一个复制的物品的指针
+class Sphere:public Primitive（球形物品派生类，基于Primitve）
+	数据：
+		1：Vector3 O;					球心坐标
+		2：double R;					球的半径
+		3：Vector3 De,Dc;				球的坐标轴（z轴和与之垂直的辐角为0的轴），用于计算纹理
+	接口：
+		1：~						如基类中规定的纯虚函数
+class Plane:public Primitive（平面物品派生类，基于Primitive）
+	数据：
+		1：Vector3 N;					平面法向量
+		2：double R;					平面与原点距离
+		3：Vector3 Dx,Dy;				平面的坐标轴，用于计算纹理，其长度有意义（纹理图片在场景中的长宽）
+	接口：
+		1：~						如基类中规定的纯虚函数
+
+【light：光源库】
+class Light（光源基类）
+	数据：
+		1：int sample;					每个光源都有的一个随机数，用于渲染时hash判断是否可能有锯齿
+		2：Color color;					光源的色光
+		3：Light* next;					下一个光源（用链表储存光源集）
+		4：[public:]double crash_dist;			碰撞前光线走过的距离
+	接口：
+		1：						各种基本信息的获取函数
+		2：virtual void Input(string var,stringstream&);从流中读取数据，其中var提示要读取的变量
+		3：virtual bool Collide(Vector3 ray_O,Vector3 ray_V)=0;
+								计算光线(ray_O,ray_V)到物品碰撞情况，碰撞前走过距离存在crash_dist中，返回是否有碰撞
+		5：virtual double CalnShade(Vector3 C,Primitive* primitive_head,int shade_quality)=0;
+		4：virtual Color GetIrradiance(Primitive* pri,Primitive* primitive_head,int shade_quality,int* hash)=0;
+								计算碰撞点的光照度乘上diff或spec的比率，蒙特卡罗算法，shade_quality*16是计算次数
+		6：virtual Photon EmitPhoton()=0;		随机得到一个刚被发射出来的光子
+class PointLight:public Light（点光源派生类，基于Light）
+	数据：
+		1：Vector3 O;					光源位置
+	接口：
+		1：~						如基类中规定的虚函数
+class AreaLight:public Light（矩形光线派生类，也可以是平行四边形，基于Light）
+	数据：
+		1：Vector3 O;					光源中心的位置
+		2：Vector3 Dx,Dy;				光源的坐标，其长度有意义（半轴长）
+	接口：
+		1：~						如基类中规定的虚函数
+
+【camera：摄像机库】
+	常数：
+		1：const double STD_LENS_WIDTH,STD_LENS_HEIGHT;	标准镜头的长（或宽）与感光点到镜头距离的比值
+		2：const int STD_IMAGE_WIDTH,STD_IMAGE_HEIGTH;	标准照片的象素长（或宽）
+		3：const int STD_SHADE_QUALITY;			~*16=标准情况下，蒙特卡罗计算阴影时的计算次数
+		4：const int STD_DREFL_QUALITY;			~*16=标准情况下，蒙特卡罗计算镜面漫反射时的计算次数	
+		5：const int STD_MAX_PHOTONS;			标准情况下光子图容量
+		6：const int STD_EMIT_PHOTONS;			标准情况下发射光子数
+		7：const int STD_SAMPLE_PHOTONS;		标准情况下采样光子数
+		8：const double STD_SAMPLE_DIST;		标准情况下采样光子半径
+class Camera
+	数据：
+		1：Vector3 O,N,Dx,Dy;				感光点位置、朝向、镜头长宽半轴
+		2：double lens_W,lens_H;			镜头的长（或宽）与感光点到镜头距离的比值
+		3：int W,H;					照片的象素长（或宽）
+		4：Color** data;				储存渲染出来的图片（每个象素的色彩）
+		5：double shade_quality;			~*16=蒙特卡罗计算阴影时的计算次数
+		6：double drefl_quality;			~*16=蒙特卡罗计算镜面漫反射时的计算次数
+		7：int max_photons;				光子图容量
+		8：int emit_photons;				发射光子数
+		9：int sample_photons;				采样光子数
+		10：double sample_dist;				采样光子半径
+	接口：
+		1：~						基本数据的获取和设置函数
+		2：Vector3 Emit(double i,double j);		得到象素(i,j)对应的射出光线
+		3：void Initialize();				初始化，在摄像机数据读入完成之后，摄像之前执行（Scene::CreateScene()的最后）。用于开数组和计算一些必要的量
+		4：void Input(string var,stringstream& fin);	从流中读取数据，其中var提示要读取的变量
+		5：void Output(Bmp*);				把得到的色光数据导入到bmp文件中
+
+【scene：场景库】
+class Scene
+	数据：
+		1：Primitive* primitive_head;			物品集的链表头
+		2：Light* light_head;				光源集的链表头
+		3：Color background_color;			背景颜色
+		4：Camera* camera;				摄像机的指针
+	接口：
+		1：~						基本数据的获取和设置函数
+		2：void CreateScene(string file);		从文件中读入场景的数据（有一定的格式，在用户手册中介绍）
+		3：Primitive* FindNearestPrimitive(Vector3 ray_O,Vector3 ray_V);
+								计算光线(ray_O,ray_V)碰到的第一个物体，碰撞信息储存在物体的crash变量中（=NULL时表示碰不到任何物体）
+		4：Light* FindNearestLight(Vector3 ray_O,Vector3 ray_V);
+								计算光线(ray_O,ray_V)碰到的第一个光源，碰撞前光走过的距离储存在物体的crash_dist变量中（=NULL时表示碰不到任何光源）
+
+【photonmap：光子图库】
+class Photon（光子）
+	数据：
+		1：Vector3 pos,dir;				光子碰撞位置和入射方向
+		2：Color power;					光子能量
+		3：int plane;					光子在KD树中划分的平面
+class Nearestphotons（最近k光子最大堆）
+	数据：
+		1：Vector3 pos;					求关于点pos的最近k光子
+		2：int max_photons;				最大保留光子数
+		3：int found;					已经找到的光子数
+		4：bool got_heap;				是否已建堆
+		5：double* dist2;				最近光子与点pos平方距离
+		6：Photon** photons;				最近光子
+class Photonmap（光子图）
+	数据：
+		1：int max_photons,stored_photons;		最大光子数和储存光子数
+		2：Photon *photons;				所有储存光子
+		3：Vector3 box_min,box_max;			场景范围的两个角
+	内部接口：
+		1：void LocatePhotons(Nearestphotons* np,int index);
+								寻找最近k光子，输入输出数据都在np中
+	接口：
+		1：void Store(Photon);				把一个光子储存在光子图中
+		2：void Balance();				建平衡KD树，在光子储存完毕之后，询问之前使用
+		3：Color GetIrradiance(Vector3 O,Vector3 N,double max_dist,int n);
+								求碰撞点O（平面法向量N）处的光通量，用最近n个光子来估算，保证能在半径max_dist中找到这些光子
+	效率：
+		1：理论效率：建n个结点的KD树O(nlogn)，询问最近的k个点O(logn+k)
+		2：实测效率：Intel(R) Core(TM) i3-2350M CPU @ 2.30GHz 2.00GB
+			光子数n=5000000、采样光子数k=100、询问数Q=1000000：建树约8s，询问约16s
+
+【photontracer：光子映射引擎库】
+class Photontracer
+	数据：
+		1：Scene* scene;				待渲染的场景
+		2：Photonmap* photonmap;			光子图
+	内部接口：
+		1：void PhotonTracing(Photon,int dep);		光子映射的主要迭代函数，起衔接作用
+		2：bool PhotonDiffusion(Primitive*,Photon,int dep,double* prob);
+								判断光子是否作漫反射（概率事件），是则模拟之
+		3：bool PhotonReflection(Primitive*,Photon,int dep,double* prob);
+								判断光子是否作反射
+		4：bool PhotonRefraction(Primitive*,Photon,int dep,double* prob);
+								判断光子是否作折射
+	接口：
+		1：~						场景和光子图的设置函数
+		2：void Run();					开始运算，根据场景计算出光子图
+
+【raytracer：光线追踪引擎库】
+class Raytracer
+	数据：	
+		1：string input,output;				输入文件名（txt文件）和输出文件名（bmp文件）
+		2：Scene scene;					待渲染的场景
+	内部接口：	
+		1：Color CalnDiffusion(Primitive* pri,int* hash);
+								计算漫反射色光，其中pri是刚碰撞到的物品的指针，碰撞信息储存在crash变量中，hash用于记录光线经过的物品（hash值不同的相邻象素要使用超级取样去锯齿）
+		2：Color CalnReflection(Primitive* pri ,Vector3 ray_V,int dep,int* hash);
+								计算反射后得到的色光，其中ray_V是入射光线的方向，dep是迭代层数
+		3：Color CalnRefraction(Primitive* pri ,Vector3 ray_V,int dep,int* hash);
+								计算折射后得到的色光
+		4：Color RayTracing(Vector3 ray_O,Vector3 ray_V,int dep,int* hash);
+								光线追踪的主要迭代函数，衔接不同层次的光线
+	接口：
+		1：~						设置输入输出文件名
+		3：void Run();					开始渲染，根据输入txt文件中的数据，渲染出图像导出在输出bmp文件中
+
+四、拓展性
+	具体的物体类和光源类可以通过派生类来实现，要求如下：
+		1：实现所有基类中的虚函数；
+		2：修改函数Scene::CreateScene()中的判断。
+

@@ -1,0 +1,31 @@
+camera
+	O= 1 -0.5 1
+	N= -1 0.4 -0.8
+	drefl_quality= 4
+	shade_quality= 4
+	max_photons= 1000000
+	emit_photons= 1000000
+	sample_photons= 500
+	sample_dist= 1
+end
+
+light area
+	O= 3 1 1
+	Dx= 1 0 0
+	Dy= 0 1 0
+	color= 8 8 8
+end
+
+primitive sphere
+	O= 0 0 0.2
+	R= 0.2
+	diff= 1
+	color= 0.9 0 0
+end
+
+primitive plane
+	N= 0 0 1
+	R= 0
+	color= 0.6 0.6 0.6			
+	diff= 1
+end
